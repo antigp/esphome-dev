@@ -2,6 +2,7 @@
 #include "esphome/core/util.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+#include <cinttypes>
 
 namespace esphome {
 namespace nextion {
@@ -47,6 +48,9 @@ bool Nextion::check_connect_() {
 
     this->ignore_is_setup_ = true;
     this->send_command_("boguscommand=0");  // bogus command. needed sometimes after updating
+    if (this->exit_reparse_on_start_) {
+      this->send_command_("DRAKJHSUYDGBNCJHGJKSHBDN");
+    }
     this->send_command_("connect");
 
     this->comok_sent_ = millis();
@@ -126,18 +130,19 @@ void Nextion::dump_config() {
   ESP_LOGCONFIG(TAG, "  Firmware Version: %s", this->firmware_version_.c_str());
   ESP_LOGCONFIG(TAG, "  Serial Number:    %s", this->serial_number_.c_str());
   ESP_LOGCONFIG(TAG, "  Flash Size:       %s", this->flash_size_.c_str());
-  ESP_LOGCONFIG(TAG, "  Wake On Touch:    %s", this->auto_wake_on_touch_ ? "True" : "False");
+  ESP_LOGCONFIG(TAG, "  Wake On Touch:    %s", YESNO(this->auto_wake_on_touch_));
+  ESP_LOGCONFIG(TAG, "  Exit reparse:     %s", YESNO(this->exit_reparse_on_start_));
 
   if (this->touch_sleep_timeout_ != 0) {
     ESP_LOGCONFIG(TAG, "  Touch Timeout:    %" PRIu32, this->touch_sleep_timeout_);
   }
 
   if (this->wake_up_page_ != -1) {
-    ESP_LOGCONFIG(TAG, "  Wake Up Page:     %d", this->wake_up_page_);
+    ESP_LOGCONFIG(TAG, "  Wake Up Page:     %" PRId16, this->wake_up_page_);
   }
 
   if (this->start_up_page_ != -1) {
-    ESP_LOGCONFIG(TAG, "  Start Up Page:    %d", this->start_up_page_);
+    ESP_LOGCONFIG(TAG, "  Start Up Page:    %" PRId16, this->start_up_page_);
   }
 }
 
@@ -187,6 +192,17 @@ void Nextion::update_all_components() {
   for (auto *textsensortype : this->textsensortype_) {
     textsensortype->update_component();
   }
+}
+
+bool Nextion::send_command(const char *command) {
+  if ((!this->is_setup() && !this->ignore_is_setup_) || this->is_sleeping())
+    return false;
+
+  if (this->send_command_(command)) {
+    this->add_no_result_to_queue_("send_command");
+    return true;
+  }
+  return false;
 }
 
 bool Nextion::send_command_printf(const char *format, ...) {
@@ -247,6 +263,7 @@ void Nextion::loop() {
     }
 
     this->set_auto_wake_on_touch(this->auto_wake_on_touch_);
+    this->set_exit_reparse_on_start(this->exit_reparse_on_start_);
 
     if (this->touch_sleep_timeout_ != 0) {
       this->set_touch_sleep_timeout(this->touch_sleep_timeout_);
@@ -1018,23 +1035,23 @@ bool Nextion::add_no_result_to_queue_with_printf_(const std::string &variable_na
  * @param is_sleep_safe The command is safe to send when the Nextion is sleeping
  */
 
-void Nextion::add_no_result_to_queue_with_set(NextionComponentBase *component, int state_value) {
+void Nextion::add_no_result_to_queue_with_set(NextionComponentBase *component, int32_t state_value) {
   this->add_no_result_to_queue_with_set(component->get_variable_name(), component->get_variable_name_to_send(),
                                         state_value);
 }
 
 void Nextion::add_no_result_to_queue_with_set(const std::string &variable_name,
-                                              const std::string &variable_name_to_send, int state_value) {
+                                              const std::string &variable_name_to_send, int32_t state_value) {
   this->add_no_result_to_queue_with_set_internal_(variable_name, variable_name_to_send, state_value);
 }
 
 void Nextion::add_no_result_to_queue_with_set_internal_(const std::string &variable_name,
-                                                        const std::string &variable_name_to_send, int state_value,
+                                                        const std::string &variable_name_to_send, int32_t state_value,
                                                         bool is_sleep_safe) {
   if ((!this->is_setup() && !this->ignore_is_setup_) || (!is_sleep_safe && this->is_sleeping()))
     return;
 
-  this->add_no_result_to_queue_with_ignore_sleep_printf_(variable_name, "%s=%d", variable_name_to_send.c_str(),
+  this->add_no_result_to_queue_with_ignore_sleep_printf_(variable_name, "%s=%" PRId32, variable_name_to_send.c_str(),
                                                          state_value);
 }
 
@@ -1130,6 +1147,8 @@ void Nextion::set_writer(const nextion_writer_t &writer) { this->writer_ = write
 
 ESPDEPRECATED("set_wait_for_ack(bool) is deprecated and has no effect", "v1.20")
 void Nextion::set_wait_for_ack(bool wait_for_ack) { ESP_LOGE(TAG, "This command is deprecated"); }
+
+bool Nextion::is_updating() { return this->is_updating_; }
 
 }  // namespace nextion
 }  // namespace esphome

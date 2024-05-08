@@ -2,6 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import i2c, sensor
 from esphome.const import (
+    CONF_COMPENSATION,
     CONF_ECO2,
     CONF_HUMIDITY,
     CONF_ID,
@@ -9,7 +10,7 @@ from esphome.const import (
     CONF_TVOC,
     DEVICE_CLASS_AQI,
     DEVICE_CLASS_CARBON_DIOXIDE,
-    DEVICE_CLASS_VOLATILE_ORGANIC_COMPOUNDS,
+    DEVICE_CLASS_VOLATILE_ORGANIC_COMPOUNDS_PARTS,
     ICON_CHEMICAL_WEAPON,
     ICON_MOLECULE_CO2,
     ICON_RADIATOR,
@@ -27,7 +28,6 @@ ENS160Component = ens160_ns.class_(
 )
 
 CONF_AQI = "aqi"
-CONF_COMPENSATION = "compensation"
 UNIT_INDEX = "index"
 
 CONFIG_SCHEMA = (
@@ -45,11 +45,10 @@ CONFIG_SCHEMA = (
                 unit_of_measurement=UNIT_PARTS_PER_BILLION,
                 icon=ICON_RADIATOR,
                 accuracy_decimals=0,
-                device_class=DEVICE_CLASS_VOLATILE_ORGANIC_COMPOUNDS,
+                device_class=DEVICE_CLASS_VOLATILE_ORGANIC_COMPOUNDS_PARTS,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
             cv.Required(CONF_AQI): sensor.sensor_schema(
-                unit_of_measurement=UNIT_INDEX,
                 icon=ICON_CHEMICAL_WEAPON,
                 accuracy_decimals=0,
                 device_class=DEVICE_CLASS_AQI,
