@@ -169,9 +169,18 @@ void WaveshareEPaperBase::update() {
 }
 void WaveshareEPaper::fill(Color color) {
   // flip logic
-  const uint8_t fill = color.is_on() ? 0x00 : 0xFF;
-  for (uint32_t i = 0; i < this->get_buffer_length_(); i++)
-    this->buffer_[i] = fill;
+  uint32_t offset = 0;
+  for (const auto &buf_color : this->get_supported_colors()) {
+    // A bit set to 1 means color is off
+    uint8_t value = 0x00;
+    if (color != buf_color) {
+      value = 0xFF;
+    }
+    for (uint32_t i = 0; i < (this->get_width_internal() * this->get_height_internal()) / 8u; i++) {
+      this->buffer_[offset + i] = value;
+    }
+    offset += (this->get_width_internal() * this->get_height_internal()) / 8u;
+  }
 }
 void HOT WaveshareEPaper::draw_absolute_pixel_internal(int x, int y, Color color) {
   if (x >= this->get_width_internal() || y >= this->get_height_internal() || x < 0 || y < 0)
@@ -180,16 +189,29 @@ void HOT WaveshareEPaper::draw_absolute_pixel_internal(int x, int y, Color color
   const uint32_t pos = (x + y * this->get_width_controller()) / 8u;
   const uint8_t subpos = x & 0x07;
   // flip logic
-  if (!color.is_on()) {
-    this->buffer_[pos] |= 0x80 >> subpos;
-  } else {
-    this->buffer_[pos] &= ~(0x80 >> subpos);
+  uint32_t offset = 0;
+  for (const auto &buf_color : this->get_supported_colors()) {
+    // A bit set to 1 means color is off
+    this->buffer_[offset + pos] &= ~(0x80 >> subpos);
+    if (color != buf_color) {
+      this->buffer_[offset + pos] |= 0x80 >> subpos;
+    }
+    offset += (this->get_width_internal() * this->get_height_internal()) / 8u;
   }
 }
 
+
 uint32_t WaveshareEPaper::get_buffer_length_() {
-  return this->get_width_controller() * this->get_height_internal() / 8u;
+  return (this->get_width_controller() * this->get_height_internal() * this->get_supported_colors().size()) / 8u;
 }  // just a black buffer
+
+display::DisplayType WaveshareEPaper::get_display_type() {
+  if (this->get_supported_colors().size() > 1) {
+    return display::DisplayType::DISPLAY_TYPE_BINARY;
+  } else {
+    return display::DisplayType::DISPLAY_TYPE_COLOR;
+  }
+}
 uint32_t WaveshareEPaperBWR::get_buffer_length_() {
   return this->get_width_controller() * this->get_height_internal() / 4u;
 }  // black and red buffer
@@ -2304,150 +2326,19 @@ void HOT WaveshareEPaper7P5InBV3::display() {
   this->wait_until_idle_();
   this->deep_sleep();
 }
-int WaveshareEPaper7P5InBV3::get_width_internal() { return 800; }
-int WaveshareEPaper7P5InBV3::get_height_internal() { return 480; }
-void WaveshareEPaper7P5InBV3::dump_config() {
-  LOG_DISPLAY("", "Waveshare E-Paper", this);
-  ESP_LOGCONFIG(TAG, "  Model: 7.5in-bv3");
-  LOG_PIN("  Reset Pin: ", this->reset_pin_);
-  LOG_PIN("  DC Pin: ", this->dc_pin_);
-  LOG_PIN("  Busy Pin: ", this->busy_pin_);
-  LOG_UPDATE_INTERVAL(this);
-}
 
-void WaveshareEPaper7P5InBV3BWR::initialize() { this->init_display_(); }
-bool WaveshareEPaper7P5InBV3BWR::wait_until_idle_() {
-  if (this->busy_pin_ == nullptr) {
-    return true;
-  }
-
-  const uint32_t start = millis();
-  while (this->busy_pin_->digital_read()) {
-    this->command(0x71);
-    if (millis() - start > this->idle_timeout_()) {
-      ESP_LOGI(TAG, "Timeout while displaying image!");
-      return false;
-    }
-    App.feed_wdt();
-    delay(10);
-  }
-  delay(200);  // NOLINT
-  return true;
-};
-void WaveshareEPaper7P5InBV3BWR::init_display_() {
-  this->reset_();
-
-  // COMMAND POWER SETTING
-  this->command(0x01);
-
-  // 1-0=11: internal power
-  this->data(0x07);
-  this->data(0x17);  // VGH&VGL
-  this->data(0x3F);  // VSH
-  this->data(0x26);  // VSL
-  this->data(0x11);  // VSHR
-
-  // VCOM DC Setting
-  this->command(0x82);
-  this->data(0x24);  // VCOM
-
-  // Booster Setting
-  this->command(0x06);
-  this->data(0x27);
-  this->data(0x27);
-  this->data(0x2F);
-  this->data(0x17);
-
-  // POWER ON
-  this->command(0x04);
-
-  delay(100);  // NOLINT
-  this->wait_until_idle_();
-  // COMMAND PANEL SETTING
-  this->command(0x00);
-  this->data(0x3F);  // KW-3f   KWR-2F BWROTP 0f BWOTP 1f
-
-  // COMMAND RESOLUTION SETTING
-  this->command(0x61);
-  this->data(0x03);  // source 800
-  this->data(0x20);
-  this->data(0x01);  // gate 480
-  this->data(0xE0);
-  // COMMAND ...?
-  this->command(0x15);
-  this->data(0x00);
-  // COMMAND VCOM AND DATA INTERVAL SETTING
-  this->command(0x50);
-  this->data(0x10);
-  this->data(0x00);
-  // COMMAND TCON SETTING
-  this->command(0x60);
-  this->data(0x22);
-  // Resolution setting
-  this->command(0x65);
-  this->data(0x00);
-  this->data(0x00);  // 800*480
-  this->data(0x00);
-  this->data(0x00);
-
-  uint8_t lut_vcom_7_i_n5_v2[] = {
-      0x0, 0xF, 0xF, 0x0, 0x0, 0x1, 0x0, 0xF, 0x1, 0xF, 0x1, 0x2, 0x0, 0xF, 0xF, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0,
-      0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-  };
-
-  uint8_t lut_ww_7_i_n5_v2[] = {
-      0x10, 0xF, 0xF, 0x0, 0x0, 0x1, 0x84, 0xF, 0x1, 0xF, 0x1, 0x2, 0x20, 0xF, 0xF, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0,
-      0x0,  0x0, 0x0, 0x0, 0x0, 0x0, 0x0,  0x0, 0x0, 0x0, 0x0, 0x0, 0x0,  0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-  };
-
-  uint8_t lut_bw_7_i_n5_v2[] = {
-      0x10, 0xF, 0xF, 0x0, 0x0, 0x1, 0x84, 0xF, 0x1, 0xF, 0x1, 0x2, 0x20, 0xF, 0xF, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0,
-      0x0,  0x0, 0x0, 0x0, 0x0, 0x0, 0x0,  0x0, 0x0, 0x0, 0x0, 0x0, 0x0,  0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-  };
-
-  uint8_t lut_wb_7_i_n5_v2[] = {
-      0x80, 0xF, 0xF, 0x0, 0x0, 0x3, 0x84, 0xF, 0x1, 0xF, 0x1, 0x4, 0x40, 0xF, 0xF, 0x0, 0x0, 0x3, 0x0, 0x0, 0x0,
-      0x0,  0x0, 0x0, 0x0, 0x0, 0x0, 0x0,  0x0, 0x0, 0x0, 0x0, 0x0, 0x0,  0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-  };
-
-  uint8_t lut_bb_7_i_n5_v2[] = {
-      0x80, 0xF, 0xF, 0x0, 0x0, 0x1, 0x84, 0xF, 0x1, 0xF, 0x1, 0x2, 0x40, 0xF, 0xF, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0,
-      0x0,  0x0, 0x0, 0x0, 0x0, 0x0, 0x0,  0x0, 0x0, 0x0, 0x0, 0x0, 0x0,  0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-  };
-
-  uint8_t count;
-  this->command(0x20);  // VCOM
-  for (count = 0; count < 42; count++)
-    this->data(lut_vcom_7_i_n5_v2[count]);
-
-  this->command(0x21);  // LUTBW
-  for (count = 0; count < 42; count++)
-    this->data(lut_ww_7_i_n5_v2[count]);
-
-  this->command(0x22);  // LUTBW
-  for (count = 0; count < 42; count++)
-    this->data(lut_bw_7_i_n5_v2[count]);
-
-  this->command(0x23);  // LUTWB
-  for (count = 0; count < 42; count++)
-    this->data(lut_wb_7_i_n5_v2[count]);
-
-  this->command(0x24);  // LUTBB
-  for (count = 0; count < 42; count++)
-    this->data(lut_bb_7_i_n5_v2[count]);
-};
 void HOT WaveshareEPaper7P5InBV3BWR::display() {
   this->init_display_();
   uint32_t buf_len = this->get_buffer_length_();
 
   this->command(0x10);
-  for (uint32_t i = 0; i < buf_len; i++) {
-    this->data(0xFF);
+  for (uint32_t i = 0; i < buf_len / 2; i++) {
+    this->data(this->buffer_[i]);
   }
 
-  this->command(0x13);  // Start Transmission
-  delay(2);
-  for (uint32_t i = 0; i < buf_len; i++) {
+  // COMMAND DATA START TRANSMISSION RED
+  this->command(0x13);
+  for (uint32_t i = buf_len / 2; i < buf_len; i++) {
     this->data(~this->buffer_[i]);
   }
 
@@ -2456,11 +2347,12 @@ void HOT WaveshareEPaper7P5InBV3BWR::display() {
   this->wait_until_idle_();
   this->deep_sleep();
 }
-int WaveshareEPaper7P5InBV3BWR::get_width_internal() { return 800; }
-int WaveshareEPaper7P5InBV3BWR::get_height_internal() { return 480; }
-void WaveshareEPaper7P5InBV3BWR::dump_config() {
+
+int WaveshareEPaper7P5InBV3::get_width_internal() { return 800; }
+int WaveshareEPaper7P5InBV3::get_height_internal() { return 480; }
+void WaveshareEPaper7P5InBV3::dump_config() {
   LOG_DISPLAY("", "Waveshare E-Paper", this);
-  ESP_LOGCONFIG(TAG, "  Model: 7.5in-bv3-bwr");
+  ESP_LOGCONFIG(TAG, "  Model: 7.5in-bv3");
   LOG_PIN("  Reset Pin: ", this->reset_pin_);
   LOG_PIN("  DC Pin: ", this->dc_pin_);
   LOG_PIN("  Busy Pin: ", this->busy_pin_);
